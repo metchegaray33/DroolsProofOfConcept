@@ -1,0 +1,114 @@
+//created on: 21/08/2014
+package com.sample
+
+
+
+//list any import classes here.
+
+import com.model.CotizacionInput;
+import com.model.Producto;
+import com.model.CotizacionOutput;
+import com.model.ContenedorFilatelia;
+import com.model.ContenedorOtros;
+import com.model.ServicioCorreo;
+import com.model.AreaDistribucion;
+import com.util.Constantes;
+
+//declare any global variables here
+
+global java.util.List list;
+
+//La regla primero se fija si el tipo de producto es filatelia, si agrupa y si la cantidad que se compró es la soportada por el producto
+//y luego selecciona el contenedor del producto que le corresponde considerando el peso volumetrico
+rule "1-Obteniendo el contenedor adecuado para producto filatelia"
+
+    when
+        	$c : CotizacionInput()
+			$p : Producto( sku == $c.sku,maxProdSoportado >= $c.cantidadComprada,getTipoProducto().getIdTipoProducto()==Constantes.ID_TIPO_PRODUCTO_FILATELIA)						
+			$z : ContenedorFilatelia(sku == $c.sku,rangoCantidadDesde <=$c.cantidadComprada,rangoCantidadHasta>=$c.cantidadComprada,pesoMaxContenedor >=$z.calcularPesoVolumetrico(largo,alto,espesor,coeficiente))
+    then
+          System.out.println("aplica regla1");
+        //PRODUCTO-CONTENEDOR-SERVICIO-PESOVOLUMETRICO
+        insertLogical(new CotizacionOutput( $p,$z,null, $z.calcularPesoVolumetrico($z.getLargo(),$z.getAlto(),$z.getEspesor(),$z.getCoeficiente()),$c.getCantidadComprada()));       
+end
+
+
+rule "2-Obteniendo el contenedor adecuado para producto No filatelia"
+
+    when
+        	$c : CotizacionInput()
+			$p : Producto( sku == $c.sku,$p.maxProdSoportado >= $c.cantidadComprada,$p.getTipoProducto().getIdTipoProducto()==Constantes.ID_TIPO_PRODUCTO_OTROS)						
+			$z : ContenedorOtros(sku == $c.sku,pesoMaxContenedor >=$z.calcularPesoVolumetrico($z.largo,$z.alto,$z.espesor,$z.coeficiente),maxProdSoportado>= $c.cantidadComprada)
+    then
+    
+         System.out.println("aplica regla2");
+        //ésta es una insercion nueva en memoria que crea un objeto que luego será utilizado en la siguiente regla
+        //PRODUCTO-CONTENEDOR-SERVICIO-PESOVOLUMETRICO
+        insertLogical(new CotizacionOutput( $p,$z,null, $z.calcularPesoVolumetrico($z.getLargo(),$z.getAlto(),$z.getEspesor(),$z.getCoeficiente()),$c.getCantidadComprada()));
+end
+
+
+rule "3-Obteniendo el contenedor adecuado cuando cantidad comprada es mayor del producto soportado y no agrupa y filatelia"
+
+    when
+        	$c : CotizacionInput()
+			$p : Producto( sku == $c.sku,maxProdSoportado < $c.cantidadComprada,getTipoProducto().getIdTipoProducto()==Constantes.ID_TIPO_PRODUCTO_FILATELIA,agrupa==Constantes.NO_AGRUPA)						
+			$z : ContenedorFilatelia(sku == $c.sku,rangoCantidadDesde ==Constantes.UNO,rangoCantidadHasta==Constantes.UNO,pesoMaxContenedor >=$z.calcularPesoVolumetrico($z.largo,$z.alto,$z.espesor,$z.coeficiente))
+    then
+    
+          System.out.println("aplica regla3");
+        //ésta es una insercion nueva en memoria que crea un objeto que luego será utilizado en la siguiente regla
+        //PRODUCTO-CONTENEDOR-SERVICIO-PESOVOLUMETRICO
+       insertLogical(new CotizacionOutput( $p,$z,null, $z.calcularPesoVolumetrico($z.getLargo(),$z.getAlto(),$z.getEspesor(),$z.getCoeficiente()),$c.getCantidadComprada()));
+end
+
+rule "4-Obteniendo el contenedor adecuado cuando cantidad comprada es mayor del producto soportado y no agrupa y NO filatelia"
+
+    when
+        	$c : CotizacionInput()
+			$p : Producto( sku == $c.sku,maxProdSoportado < $c.cantidadComprada,$p.getTipoProducto().getIdTipoProducto()==Constantes.ID_TIPO_PRODUCTO_OTROS,agrupa==Constantes.NO_AGRUPA)						
+			$z : ContenedorOtros(sku == $c.sku,pesoMaxContenedor >=$z.calcularPesoVolumetrico($z.largo,$z.alto,$z.espesor,$z.coeficiente),maxProdSoportado==Constantes.UNO)
+    then
+    
+         System.out.println("aplica regla4");
+        //ésta es una insercion nueva en memoria que crea un objeto que luego será utilizado en la siguiente regla
+        //PRODUCTO-CONTENEDOR-SERVICIO-PESOVOLUMETRICO
+       insertLogical(new CotizacionOutput( $p,$z,null, $z.calcularPesoVolumetrico($z.getLargo(),$z.getAlto(),$z.getEspesor(),$z.getCoeficiente()),$c.getCantidadComprada()));
+end
+
+
+//La regla selecciona el servicio de correo que correponde al producto teniendo en cuenta el precio, area de distribucion y tipo de servicio
+rule "5-Obteniendo el servicio cuando SI agruga"
+
+    when
+    		$c : CotizacionInput()
+        	$o : CotizacionOutput(producto.sku==$c.sku,producto.agrupa==Constantes.SI_AGRUPA)
+			$z : ServicioCorreo(idServicio==$c.servicioCorreo.idServicio,areaDistribucion.areaEstandarDistribucion==$c.servicioCorreo.areaDistribucion.areaEstandarDistribucion,rangoPesoDesde<=$o.contenedor.pesoMaxContenedor,rangoPesoHasta>=$o.contenedor.pesoMaxContenedor)
+    then
+        //actions
+        
+        System.out.println("aplica regla5");
+        $o.setServicioCorreo($z);              
+        $c.setCotizacionOutput(new CotizacionOutput($o.getProducto(),$o.getContenedor(),$o.getServicioCorreo() ,$o.getPesoVolumetrico(),1));    
+      //  System.out.println( "precio guardado" + $o.servicioCorreo.precio );
+        
+        
+end
+
+rule "6-Obteniendo el servicio cuando NO agruga"
+
+    when
+    		$c : CotizacionInput()
+        	$o : CotizacionOutput(producto.sku==$c.sku,producto.agrupa==Constantes.NO_AGRUPA)
+			$z : ServicioCorreo(idServicio==$c.servicioCorreo.idServicio,areaDistribucion.areaEstandarDistribucion==$c.servicioCorreo.areaDistribucion.areaEstandarDistribucion,rangoPesoDesde<=$o.contenedor.pesoMaxContenedor,rangoPesoHasta>=$o.contenedor.pesoMaxContenedor)
+    then
+        //actions        
+       System.out.println("aplica regla6");
+        $o.setServicioCorreo($z);        
+        $c.setCotizacionOutput(new CotizacionOutput($o.getProducto(),$o.getContenedor(),$o.getServicioCorreo() ,$o.getPesoVolumetrico(),$c.getCantidadComprada()));
+        
+      //  System.out.println( "precio guardado" + $o.servicioCorreo.precio );        
+end
+
+
+
